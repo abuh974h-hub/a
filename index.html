@@ -509,8 +509,6 @@ const questionsData = [
     {id: 42, question: "قيمة x تساوي (زوايا في دائرة)", options: ["50°", "140°", "30°", "20°"], correct: 0, explanation: "الزاوية المحيطية = نصف قياس القوس المقابل\nx = 50°", type: "mcq"},
 {id: 43, question: "مركز الدائرة التي معادلتها &lrm;(x - 2)<sup>2</sup> + (y - 4)<sup>2</sup> = 25 هو النقطة", options: ["<span dir='ltr'>(-2, -4)</span>", "<span dir='ltr'>(-2, 4)</span>", "<span dir='ltr'>(2, -4)</span>", "<span dir='ltr'>(2, 4)</span>"], correct: 3, explanation: "المركز = (2, 4)", type: "mcq"},
 {id: 44, question: "نصف قطر الدائرة التي معادلتها &lrm;(x - 2)<sup>2</sup> + (y - 4)<sup>2</sup> = 25<sup>2</sup> يساوي", options: ["<span dir='ltr'>25</span>", "<span dir='ltr'>10</span>", "<span dir='ltr'>5</span>", "<span dir='ltr'>4</span>"], correct: 2, explanation: "<span dir='ltr'>r² = 25 → r = 5</span>", type: "mcq"},
-
-
     {id: 45, question: "قياس القوس الأكبر GLH يساوي", options: ["180°", "122°", "58°", "238°"], correct: 3, explanation: "360° - 122° = 238°", type: "mcq"},
     {id: 46, question: "دائرة محيطها 24π cm فإن طول نصف قطرها يساوي", options: ["24 cm", "6 cm", "4 cm", "12 cm"], correct: 3, explanation: "2πr = 24π → r = 12 cm", type: "mcq"},
     {id: 47, question: "قيمة x تساوي (زوايا في دائرة)", options: ["180°", "102°", "50°", "21°"], correct: 1, explanation: "x = 102°", type: "mcq"},
@@ -1189,6 +1187,213 @@ document.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight') nextPage();
     if (e.key === 'ArrowLeft') prevPage();
 });
+
+
+</script>
+
+<script>
+(function() {
+    'use strict';
+    
+    const SHEETDB_API = 'https://sheetdb.io/api/v1/809jtgv7fqnzj';
+    const USE_LOCAL = location.protocol === 'file:' || location.hostname === 'localhost';
+    
+    // ==================== نظام التخزين المزدوج ====================
+    
+    const Storage = {
+        // حفظ نتيجة
+        async save(resultData) {
+            // حفظ محلي دائماً
+            this.saveLocal(resultData);
+            
+            // محاولة إرسال إلى SheetDB إذا كان متصلاً
+            if (!USE_LOCAL) {
+                try {
+                    await this.saveRemote(resultData);
+                } catch(e) {
+                    console.log('💾 تم الحفظ محلياً فقط');
+                }
+            }
+        },
+        
+        // حفظ محلي
+        saveLocal(data) {
+            const key = 'quiz_results';
+            const existing = JSON.parse(localStorage.getItem(key) || '[]');
+            existing.push({ ...data, id: Date.now(), synced: false });
+            localStorage.setItem(key, JSON.stringify(existing));
+            console.log('💾 محلي:', data);
+        },
+        
+        // حفظ عن بعد
+        async saveRemote(data) {
+            const response = await fetch(SHEETDB_API, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ data: [data] })
+            });
+            if (!response.ok) throw new Error('Failed');
+            console.log('☁️ SheetDB:', data);
+            return true;
+        },
+        
+        // جلب جميع النتائج
+        async getAll() {
+            let local = JSON.parse(localStorage.getItem('quiz_results') || '[]');
+            
+            if (!USE_LOCAL) {
+                try {
+                    const remote = await fetch(SHEETDB_API).then(r => r.json());
+                    // دمج البيانات
+                    local = this.merge(local, remote);
+                    localStorage.setItem('quiz_results', JSON.stringify(local));
+                } catch(e) {
+                    console.log('📴 وضع عدم الاتصال - استخدام البيانات المحلية');
+                }
+            }
+            
+            return local;
+        },
+        
+        // دمج بيانات محلية وعن بعد
+        merge(local, remote) {
+            const merged = [...local];
+            remote.forEach(r => {
+                if (!merged.find(l => l.studentName === r.studentName && l.date === r.date)) {
+                    merged.push(r);
+                }
+            });
+            return merged;
+        }
+    };
+    
+    // ==================== ربط مع التطبيق الأصلي ====================
+    
+    // ربط مع showResults
+    function hookResults() {
+        const orig = window.showResults;
+        if (!orig || orig._hooked) return;
+        
+        window.showResults = function() {
+            orig.apply(this, arguments);
+            
+            // جمع البيانات من DOM
+            const getText = (id) => {
+                const el = document.getElementById(id);
+                return el ? el.textContent || el.value : '';
+            };
+            
+            const result = {
+                studentName: document.getElementById('studentName')?.value || 'غير معروف',
+                studentClass: document.getElementById('studentClass')?.value || '',
+                score: parseInt(getText('resultScore')) || 0,
+                correctCount: parseInt(getText('correctCount')) || 0,
+                wrongCount: parseInt(getText('wrongCount')) || 0,
+                timeTaken: getText('timeTaken'),
+                date: new Date().toISOString().split('T')[0],
+                mode: window.quizMode || 'normal'
+            };
+            
+            Storage.save(result);
+        };
+        window.showResults._hooked = true;
+    }
+    
+    // تحديث لوحة المعلم
+    async function updateDashboard() {
+        const stats = await Storage.getAll();
+        
+        if (!stats.length) {
+            console.log('⚠️ لا توجد بيانات');
+            return;
+        }
+        
+        // الأرقام
+        const setText = (id, val) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = val;
+        };
+        
+        setText('totalStudents', stats.length);
+        setText('totalTests', stats.length);
+        
+        const scores = stats.map(s => s.score || 0);
+        const avg = Math.round(scores.reduce((a,b) => a+b, 0) / scores.length);
+        const best = Math.max(...scores);
+        
+        setText('avgScore', avg + '%');
+        setText('bestScore', best + '%');
+        
+        // قائمة الطلاب
+        const list = document.getElementById('studentsList');
+        if (list) {
+            list.innerHTML = '';
+            stats.forEach(s => {
+                const score = s.score || 0;
+                const cls = score >= 80 ? 'score-high' : score >= 60 ? 'score-mid' : 'score-low';
+                list.innerHTML += `
+                    <div class="student-row">
+                        <div>
+                            <div class="student-name">${s.studentName}</div>
+                            <div class="student-meta">${s.studentClass} | ${s.date}</div>
+                        </div>
+                        <div class="student-score ${cls}">${score}%</div>
+                    </div>`;
+            });
+        }
+        
+        // الرسوم البيانية
+        if (window.distributionChart) {
+            const dist = [0,0,0,0,0];
+            scores.forEach(s => {
+                if (s<=20) dist[0]++;
+                else if (s<=40) dist[1]++;
+                else if (s<=60) dist[2]++;
+                else if (s<=80) dist[3]++;
+                else dist[4]++;
+            });
+            window.distributionChart.data.datasets[0].data = dist;
+            window.distributionChart.update();
+        }
+        
+        if (window.progressChart) {
+            window.progressChart.data.labels = scores.map((_,i) => (i+1).toString());
+            window.progressChart.data.datasets[0].data = scores;
+            window.progressChart.update();
+        }
+    }
+    
+    // ربط لوحة المعلم
+    function hookTeacher() {
+        const orig = window.updateTeacherDashboard;
+        if (!orig || orig._hooked) return;
+        
+        window.updateTeacherDashboard = function() {
+            updateDashboard();
+        };
+        window.updateTeacherDashboard._hooked = true;
+    }
+    
+    // ==================== التشغيل ====================
+    
+    function init() {
+        console.log('🚀 نظام التخزين المزدوج جاهز');
+        console.log(USE_LOCAL ? '📁 وضع محلي' : '☁️ وضع متصل');
+        
+        // محاولة الربط
+        setTimeout(() => {
+            hookResults();
+            hookTeacher();
+            console.log('✅ تم الربط');
+        }, 1500);
+    }
+    
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+})();
 </script>
 </body>
 </html>
