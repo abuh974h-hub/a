@@ -1190,13 +1190,11 @@ document.addEventListener('keydown', (e) => {
 
 
 </script>
-
 <script>
 (function() {
     'use strict';
     
     const SHEETDB_API = 'https://sheetdb.io/api/v1/809jtgv7fqnzj';
-    const USE_LOCAL = location.protocol === 'file:' || location.hostname === 'localhost';
     
     // ==================== نظام التخزين المزدوج ====================
     
@@ -1206,13 +1204,11 @@ document.addEventListener('keydown', (e) => {
             // حفظ محلي دائماً
             this.saveLocal(resultData);
             
-            // محاولة إرسال إلى SheetDB إذا كان متصلاً
-            if (!USE_LOCAL) {
-                try {
-                    await this.saveRemote(resultData);
-                } catch(e) {
-                    console.log('💾 تم الحفظ محلياً فقط');
-                }
+            // محاولة إرسال إلى SheetDB
+            try {
+                await this.saveRemote(resultData);
+            } catch(e) {
+                console.log('💾 تم الحفظ محلياً فقط (SheetDB غير متاح)');
             }
         },
         
@@ -1225,31 +1221,46 @@ document.addEventListener('keydown', (e) => {
             console.log('💾 محلي:', data);
         },
         
-        // حفظ عن بعد
+        // حفظ عن بعد - معالجة الأخطاء
         async saveRemote(data) {
             const response = await fetch(SHEETDB_API, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ data: [data] })
             });
-            if (!response.ok) throw new Error('Failed');
+            
+            if (!response.ok) {
+                const text = await response.text();
+                console.log('⚠️ SheetDB رد:', text);
+                throw new Error('Failed: ' + text);
+            }
+            
             console.log('☁️ SheetDB:', data);
             return true;
         },
         
-        // جلب جميع النتائج
+        // جلب جميع النتائج - معالجة الجدول الفارغ
         async getAll() {
             let local = JSON.parse(localStorage.getItem('quiz_results') || '[]');
             
-            if (!USE_LOCAL) {
-                try {
-                    const remote = await fetch(SHEETDB_API).then(r => r.json());
-                    // دمج البيانات
-                    local = this.merge(local, remote);
-                    localStorage.setItem('quiz_results', JSON.stringify(local));
-                } catch(e) {
-                    console.log('📴 وضع عدم الاتصال - استخدام البيانات المحلية');
+            try {
+                const response = await fetch(SHEETDB_API);
+                if (!response.ok) throw new Error('Network error');
+                
+                const remote = await response.json();
+                
+                // إذا كان الجدول فارغاً أو يحتوي على header فقط
+                if (!Array.isArray(remote) || remote.length === 0) {
+                    console.log('📭 SheetDB فارغ - استخدام البيانات المحلية');
+                    return local;
                 }
+                
+                // دمج البيانات
+                local = this.merge(local, remote);
+                localStorage.setItem('quiz_results', JSON.stringify(local));
+                
+            } catch(e) {
+                console.log('📴 وضع عدم الاتصال - المحلي:', local.length, 'سجل');
             }
             
             return local;
@@ -1259,9 +1270,15 @@ document.addEventListener('keydown', (e) => {
         merge(local, remote) {
             const merged = [...local];
             remote.forEach(r => {
-                if (!merged.find(l => l.studentName === r.studentName && l.date === r.date)) {
-                    merged.push(r);
-                }
+                // تخطي صف العناوين إذا وجد
+                if (r.studentName === 'اسم الطالب') return;
+                
+                const exists = merged.find(l => 
+                    l.studentName === r.studentName && 
+                    l.date === r.date &&
+                    l.score == r.score
+                );
+                if (!exists) merged.push(r);
             });
             return merged;
         }
@@ -1305,6 +1322,9 @@ document.addEventListener('keydown', (e) => {
         
         if (!stats.length) {
             console.log('⚠️ لا توجد بيانات');
+            // إظهار رسالة للمعلم
+            const list = document.getElementById('studentsList');
+            if (list) list.innerHTML = '<div style="text-align:center; padding:20px; color:#666;">لا توجد بيانات متاحة</div>';
             return;
         }
         
@@ -1317,9 +1337,9 @@ document.addEventListener('keydown', (e) => {
         setText('totalStudents', stats.length);
         setText('totalTests', stats.length);
         
-        const scores = stats.map(s => s.score || 0);
-        const avg = Math.round(scores.reduce((a,b) => a+b, 0) / scores.length);
-        const best = Math.max(...scores);
+        const scores = stats.map(s => parseInt(s.score) || 0);
+        const avg = scores.length ? Math.round(scores.reduce((a,b) => a+b, 0) / scores.length) : 0;
+        const best = scores.length ? Math.max(...scores) : 0;
         
         setText('avgScore', avg + '%');
         setText('bestScore', best + '%');
@@ -1329,13 +1349,13 @@ document.addEventListener('keydown', (e) => {
         if (list) {
             list.innerHTML = '';
             stats.forEach(s => {
-                const score = s.score || 0;
+                const score = parseInt(s.score) || 0;
                 const cls = score >= 80 ? 'score-high' : score >= 60 ? 'score-mid' : 'score-low';
                 list.innerHTML += `
                     <div class="student-row">
                         <div>
-                            <div class="student-name">${s.studentName}</div>
-                            <div class="student-meta">${s.studentClass} | ${s.date}</div>
+                            <div class="student-name">${s.studentName || 'غير معروف'}</div>
+                            <div class="student-meta">${s.studentClass || ''} | ${s.date || ''}</div>
                         </div>
                         <div class="student-score ${cls}">${score}%</div>
                     </div>`;
@@ -1378,13 +1398,19 @@ document.addEventListener('keydown', (e) => {
     
     function init() {
         console.log('🚀 نظام التخزين المزدوج جاهز');
-        console.log(USE_LOCAL ? '📁 وضع محلي' : '☁️ وضع متصل');
         
         // محاولة الربط
         setTimeout(() => {
             hookResults();
             hookTeacher();
             console.log('✅ تم الربط');
+            
+            // اختبار الاتصال بـ SheetDB
+            fetch(SHEETDB_API)
+                .then(r => r.json())
+                .then(data => console.log('📊 SheetDB:', data))
+                .catch(err => console.log('📴 SheetDB غير متاح'));
+                
         }, 1500);
     }
     
