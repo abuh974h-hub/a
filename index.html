@@ -224,6 +224,32 @@
         .review-question { font-weight: 700; margin-bottom: 8px; }
         .review-answer { font-size: 14px; color: var(--text-light); margin-bottom: 10px; }
 
+        /* Loading spinner */
+        .loading-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255,255,255,0.9); display: none;
+            align-items: center; justify-content: center; z-index: 2000; flex-direction: column;
+        }
+        .loading-overlay.active { display: flex; }
+        .spinner {
+            width: 50px; height: 50px; border: 4px solid var(--border);
+            border-top-color: var(--primary); border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { margin-top: 16px; color: var(--text-light); font-size: 14px; }
+
+        /* Sync status */
+        .sync-status {
+            position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+            padding: 10px 20px; border-radius: 20px; font-size: 13px; font-weight: 600;
+            z-index: 1500; display: none; animation: fadeIn 0.3s ease-out;
+        }
+        .sync-status.show { display: block; }
+        .sync-status.success { background: #d1fae5; color: #065f46; }
+        .sync-status.error { background: #fee2e2; color: #991b1b; }
+        .sync-status.info { background: #dbeafe; color: #1e40af; }
+
         @media (max-width: 480px) {
             .login-card { padding: 30px 20px; }
             .login-title { font-size: 24px; }
@@ -243,6 +269,15 @@
     </style>
 </head>
 <body>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-text">جاري التحميل...</div>
+    </div>
+
+    <!-- Sync Status -->
+    <div id="syncStatus" class="sync-status"></div>
 
     <!-- 1. شاشة تسجيل الدخول -->
     <div id="loginScreen" class="login-screen active">
@@ -266,7 +301,7 @@
         </div>
     </div>
 
-    <!-- 2. اختيار نمط الاختبار (مدمج في شاشة الدخول) -->
+    <!-- 2. اختيار نمط الاختبار -->
     <div id="modeScreen" class="container screen">
         <div class="login-card" style="margin-top: 20px; padding: 20px 15px; max-width: 100%;">
             <div class="logo-icon" style="font-size: 40px; margin-bottom: 8px;">🎯</div>
@@ -373,9 +408,14 @@
                     <h1 class="dashboard-title">📊 لوحة تحكم المعلم</h1>
                     <p style="color: var(--text-light); font-size: 14px;">إحصائيات الطلاب والاختبارات</p>
                 </div>
-                <button class="btn btn-secondary btn-small" onclick="closeTeacher()">
-                    <span>✖️</span> خروج
-                </button>
+                <div style="display: flex; gap: 8px;">
+                    <button class="btn btn-success btn-small" onclick="syncData()">
+                        <span>🔄</span> مزامنة
+                    </button>
+                    <button class="btn btn-secondary btn-small" onclick="closeTeacher()">
+                        <span>✖️</span> خروج
+                    </button>
+                </div>
             </div>
         </div>
         <div class="filter-row">
@@ -448,6 +488,10 @@
     </div>
 
 <script>
+// ==================== SHEETDB API CONFIG ====================
+const SHEETDB_API_URL = 'https://sheetdb.io/api/v1/809jtgv7fqnzj';
+const SHEETDB_API_KEY = ''; // اتركه فارغاً إذا لم يكن هناك مفتاح
+
 // ==================== DATA ====================
 const questionsData = [
     {id: 1, question: "مجموع قياسات الزوايا الداخلية للثماني المحدب", options: ["1080°", "1260°", "720°", "540°"], correct: 0, explanation: "قانون: مجموع زوايا المضلع = (n-2) × 180°\nللثماني: (8-2) × 180° = 6 × 180° = 1080°", type: "mcq"},
@@ -545,31 +589,107 @@ let timerInterval = null;
 let progressChart = null;
 let distributionChart = null;
 let quizResults = [];
+let isOnline = true;
 
-// ==================== LOCAL STORAGE ====================
-const STORAGE_KEY = 'mathQuizData_v2';
-
-function saveQuizData() {
-    const data = {
-        results: quizResults,
-        lastUpdated: new Date().toISOString()
-    };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+// ==================== UI HELPERS ====================
+function showLoading(text) {
+    document.getElementById('loadingText').textContent = text || 'جاري التحميل...';
+    document.getElementById('loadingOverlay').classList.add('active');
 }
 
-function loadQuizData() {
+function hideLoading() {
+    document.getElementById('loadingOverlay').classList.remove('active');
+}
+
+function showSyncStatus(message, type) {
+    const status = document.getElementById('syncStatus');
+    status.textContent = message;
+    status.className = 'sync-status show ' + (type || 'info');
+    setTimeout(() => status.classList.remove('show'), 3000);
+}
+
+// ==================== SHEETDB API FUNCTIONS ====================
+async function fetchFromSheetDB() {
     try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored) {
-            const data = JSON.parse(stored);
-            quizResults = data.results || [];
-        } else {
-            quizResults = [];
-        }
-    } catch (e) {
-        console.error('Error loading quiz data:', e);
-        quizResults = [];
+        const response = await fetch(SHEETDB_API_URL);
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const data = await response.json();
+        return Array.isArray(data) ? data : [];
+    } catch (error) {
+        console.error('SheetDB fetch error:', error);
+        isOnline = false;
+        return [];
     }
+}
+
+async function saveToSheetDB(record) {
+    try {
+        const response = await fetch(SHEETDB_API_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ data: [record] })
+        });
+        
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const result = await response.json();
+        showSyncStatus('✅ تم الحفظ في السحابة', 'success');
+        return true;
+    } catch (error) {
+        console.error('SheetDB save error:', error);
+        showSyncStatus('⚠️ تم الحفظ محلياً فقط', 'error');
+        return false;
+    }
+}
+
+async function loadQuizData() {
+    showLoading('جاري تحميل البيانات...');
+    try {
+        // محاولة تحميل من SheetDB
+        const sheetData = await fetchFromSheetDB();
+        
+        if (sheetData.length > 0) {
+            quizResults = sheetData.map(row => ({
+                name: row.name || row['الاسم'] || '',
+                class: row.class || row['الشعبة'] || '',
+                score: parseInt(row.score || row['الدرجة'] || 0),
+                correct: parseInt(row.correct || row['الصحيح'] || 0),
+                wrong: parseInt(row.wrong || row['الخاطئ'] || 0),
+                total: parseInt(row.total || row['المجموع'] || 63),
+                time: parseInt(row.time || row['الوقت'] || 0),
+                mode: row.mode || row['النمط'] || 'normal',
+                date: row.date || row['التاريخ'] || new Date().toISOString()
+            })).filter(r => r.name);
+            
+            // تحديث localStorage كنسخة احتياطية
+            localStorage.setItem('mathQuiz_backup', JSON.stringify(quizResults));
+            showSyncStatus('✅ تم تحميل البيانات من السحابة', 'success');
+        } else {
+            // محاولة تحميل من localStorage كاحتياطي
+            const backup = localStorage.getItem('mathQuiz_backup');
+            if (backup) {
+                quizResults = JSON.parse(backup);
+                showSyncStatus('⚠️ تم تحميل البيانات المحلية', 'info');
+            } else {
+                quizResults = [];
+            }
+        }
+    } catch (error) {
+        console.error('Load error:', error);
+        const backup = localStorage.getItem('mathQuiz_backup');
+        quizResults = backup ? JSON.parse(backup) : [];
+    } finally {
+        hideLoading();
+    }
+}
+
+async function syncData() {
+    showLoading('جاري المزامنة...');
+    await loadQuizData();
+    updateTeacherDashboard();
+    hideLoading();
+    showSyncStatus('✅ تمت المزامنة بنجاح', 'success');
 }
 
 // ==================== NAVIGATION ====================
@@ -593,9 +713,7 @@ function goToModeSelection() {
         return;
     }
     
-    // حفظ بيانات الطالب في localStorage
     localStorage.setItem('currentStudent', JSON.stringify({name: studentName, class: studentClass}));
-    
     showScreen('modeScreen');
 }
 
@@ -612,7 +730,6 @@ function startQuiz() {
         return;
     }
     
-    // تحضير الأسئلة
     quizQuestions = [...questionsData];
     
     if (selectedMode === 'shuffle' || selectedMode === 'full-shuffle') {
@@ -633,7 +750,6 @@ function startQuiz() {
     currentPage = 0;
     startTime = Date.now();
     
-    // تحديث واجهة الاختبار
     document.getElementById('quizStudentName').textContent = studentName;
     document.getElementById('quizStudentMeta').textContent = 'الشعبة: ' + studentClass;
     document.getElementById('avatarInitial').textContent = studentName.charAt(0);
@@ -643,7 +759,6 @@ function startQuiz() {
     renderPage();
     startTimer();
     
-    // إخفاء زر المعلم أثناء الاختبار
     document.getElementById('teacherAccess').classList.add('hidden');
 }
 
@@ -665,7 +780,6 @@ function startTimer() {
         const secs = (elapsed % 60).toString().padStart(2, '0');
         document.getElementById('timerText').textContent = `${mins}:${secs}`;
         
-        // تحذير عند 10 دقائق
         if (elapsed > 600) {
             document.getElementById('timerBadge').classList.add('warning');
         }
@@ -722,7 +836,6 @@ function renderPage() {
     const page = pages[currentPage];
     const pageQuestions = quizQuestions.slice(page.start, page.end);
     
-    // عنوان الصفحة
     const banner = document.createElement('div');
     banner.className = 'page-title-banner';
     banner.textContent = page.title;
@@ -744,7 +857,6 @@ function renderPage() {
         let html = `<div class="question-number">س ${globalIdx + 1}</div>`;
         html += `<div class="question-text">${q.question}</div>`;
         
-        // صورة السؤال
         if (questionImages[q.id] && questionImages[q.id].trim() !== '') {
             html += `<img src="${questionImages[q.id]}" class="question-image" alt="صورة السؤال">`;
         }
@@ -775,14 +887,12 @@ function renderPage() {
     
     container.appendChild(pageDiv);
     
-    // تحديث شريط التقدم
     const answered = Object.keys(answers).length;
     const percent = Math.round((answered / quizQuestions.length) * 100);
     document.getElementById('progressBar').style.width = percent + '%';
     document.getElementById('progressPercent').textContent = percent + '%';
     document.getElementById('questionCounter').textContent = `الصفحة ${currentPage + 1} من 3`;
     
-    // تحديث أزرار التنقل
     document.getElementById('prevBtn').disabled = currentPage === 0;
     document.getElementById('nextBtn').innerHTML = currentPage === 2 ? 'إنهاء الاختبار <span>✅</span>' : 'الصفحة التالية <span>➡️</span>';
 }
@@ -812,7 +922,7 @@ function prevPage() {
 }
 
 // ==================== FINISH QUIZ ====================
-function finishQuiz() {
+async function finishQuiz() {
     stopTimer();
     
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
@@ -838,7 +948,6 @@ function finishQuiz() {
     const totalAnswered = correct + wrong;
     const score = totalAnswered > 0 ? Math.round((correct / quizQuestions.length) * 100) : 0;
     
-    // حفظ النتيجة
     const result = {
         name: studentName,
         class: studentClass,
@@ -848,14 +957,15 @@ function finishQuiz() {
         total: quizQuestions.length,
         time: elapsed,
         mode: selectedMode,
-        date: new Date().toISOString(),
-        answers: {...answers},
-        questions: quizQuestions.map(q => ({id: q.id, question: q.question, correct: q.correct, type: q.type, options: q.options}))
+        date: new Date().toISOString()
     };
     
-    loadQuizData();
+    // حفظ في SheetDB
+    await saveToSheetDB(result);
+    
+    // تحديث القائمة المحلية
     quizResults.push(result);
-    saveQuizData();
+    localStorage.setItem('mathQuiz_backup', JSON.stringify(quizResults));
     
     // عرض النتائج
     document.getElementById('resultScore').textContent = score + '%';
@@ -866,7 +976,7 @@ function finishQuiz() {
     let emoji = '🎉', title = 'ممتاز!', msg = 'أداء رائع، استمر!';
     if (score < 90) { emoji = '👏'; title = 'أحسنت!'; msg = 'نتيجة جيدة جداً'; }
     if (score < 75) { emoji = '👍'; title = 'جيد'; msg = 'يمكنك التحسن أكثر'; }
-    if (score < 60) { emoji = '💪'; title = 'حاول مرة أخرى'; msg = ' المراجعة تساعدك على التحسن'; }
+    if (score < 60) { emoji = '💪'; title = 'حاول مرة أخرى'; msg = 'المراجعة تساعدك على التحسن'; }
     
     document.getElementById('resultEmoji').textContent = emoji;
     document.getElementById('resultTitle').textContent = title;
@@ -929,12 +1039,12 @@ function closeTeacherModal() {
     document.getElementById('teacherModal').classList.remove('active');
 }
 
-function verifyTeacher() {
+async function verifyTeacher() {
     const pass = document.getElementById('teacherPassword').value;
     if (pass === '1234') {
         closeTeacherModal();
         showScreen('teacherScreen');
-        loadQuizData();
+        await loadQuizData();
         initTeacherDashboard();
     } else {
         alert('كلمة المرور غير صحيحة');
@@ -945,15 +1055,9 @@ function closeTeacher() {
     showScreen('resultsScreen');
 }
 
-// ==================== TEACHER DASHBOARD - FIXED ====================
+// ==================== TEACHER DASHBOARD ====================
 function initTeacherDashboard() {
-    // تحميل البيانات
-    loadQuizData();
-    
-    // ملء الفلاتر
     fillFilters();
-    
-    // تحديث اللوحة
     updateTeacherDashboard();
 }
 
@@ -961,11 +1065,9 @@ function fillFilters() {
     const sectionFilter = document.getElementById('sectionFilter');
     const studentFilter = document.getElementById('studentFilter');
     
-    // الحفاظ على القيمة المختارة
     const selectedSection = sectionFilter.value;
     const selectedStudent = studentFilter.value;
     
-    // استخراج الشعب الفريدة
     const sections = [...new Set(quizResults.map(r => r.class).filter(Boolean))].sort();
     
     sectionFilter.innerHTML = '<option value="">الكل</option>';
@@ -976,7 +1078,6 @@ function fillFilters() {
         sectionFilter.appendChild(opt);
     });
     
-    // استخراج الطلاب الفريدين
     const students = [...new Set(quizResults.map(r => r.name).filter(Boolean))].sort();
     
     studentFilter.innerHTML = '<option value="">جميع الاختبارات</option>';
@@ -987,18 +1088,14 @@ function fillFilters() {
         studentFilter.appendChild(opt);
     });
     
-    // استعادة القيم المختارة
     if (selectedSection) sectionFilter.value = selectedSection;
     if (selectedStudent) studentFilter.value = selectedStudent;
 }
 
 function updateTeacherDashboard() {
-    loadQuizData();
-    
     const sectionFilter = document.getElementById('sectionFilter').value;
     const studentFilter = document.getElementById('studentFilter').value;
     
-    // تصفية النتائج
     let filtered = [...quizResults];
     
     if (sectionFilter) {
@@ -1009,28 +1106,19 @@ function updateTeacherDashboard() {
         filtered = filtered.filter(r => r.name === studentFilter);
     }
     
-    // إذا لم تكن هناك نتائج، أظهر رسالة
     if (filtered.length === 0) {
         document.getElementById('totalStudents').textContent = '0';
         document.getElementById('totalTests').textContent = '0';
         document.getElementById('avgScore').textContent = '0%';
         document.getElementById('bestScore').textContent = '0%';
         
-        // مسح الرسوم البيانية
-        if (progressChart) {
-            progressChart.destroy();
-            progressChart = null;
-        }
-        if (distributionChart) {
-            distributionChart.destroy();
-            distributionChart = null;
-        }
+        if (progressChart) { progressChart.destroy(); progressChart = null; }
+        if (distributionChart) { distributionChart.destroy(); distributionChart = null; }
         
-        document.getElementById('studentsList').innerHTML = '<p style="text-align: center; color: var(--text-light); padding: 20px;">لا توجد بيانات متاحة</p>';
+        document.getElementById('studentsList').innerHTML = '<p style="text-align: center; color: var(--text-light); padding: 20px;">لا توجد بيانات متاحة. قم بإجراء اختبار أولاً أو اضغط على "مزامنة"</p>';
         return;
     }
     
-    // حساب الإحصائيات
     const uniqueStudents = [...new Set(filtered.map(r => r.name))];
     const totalTests = filtered.length;
     const scores = filtered.map(r => r.score);
@@ -1042,33 +1130,24 @@ function updateTeacherDashboard() {
     document.getElementById('avgScore').textContent = avgScore + '%';
     document.getElementById('bestScore').textContent = bestScore + '%';
     
-    // رسم منحنى التقدم
     renderProgressChart(filtered, studentFilter);
-    
-    // رسم توزيع الدرجات
     renderDistributionChart(filtered);
-    
-    // قائمة الطلاب
     renderStudentsList(filtered);
 }
 
 function renderProgressChart(data, studentFilter) {
     const ctx = document.getElementById('progressChart').getContext('2d');
     
-    if (progressChart) {
-        progressChart.destroy();
-    }
+    if (progressChart) progressChart.destroy();
     
     let chartData, labels;
     
     if (studentFilter) {
-        // عرض تقدم طالب محدد
-        const studentData = data.filter(r => r.name === studentFilter);
+        const studentData = data.filter(r => r.name === studentFilter).sort((a, b) => new Date(a.date) - new Date(b.date));
         labels = studentData.map((r, i) => `محاولة ${i + 1}`);
         chartData = studentData.map(r => r.score);
         document.getElementById('progressChartTitle').textContent = `📈 تقدم ${studentFilter}`;
     } else {
-        // عرض متوسط الدرجات حسب التاريخ
         const grouped = {};
         data.forEach(r => {
             const date = new Date(r.date).toLocaleDateString('ar-SA');
@@ -1076,7 +1155,7 @@ function renderProgressChart(data, studentFilter) {
             grouped[date].push(r.score);
         });
         
-        labels = Object.keys(grouped).slice(-10); // آخر 10 أيام
+        labels = Object.keys(grouped).slice(-10);
         chartData = labels.map(d => Math.round(grouped[d].reduce((a, b) => a + b, 0) / grouped[d].length));
         document.getElementById('progressChartTitle').textContent = '📈 متوسط الدرجات حسب التاريخ';
     }
@@ -1100,18 +1179,10 @@ function renderProgressChart(data, studentFilter) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
+            plugins: { legend: { display: false } },
             scales: {
-                y: {
-                    beginAtZero: true,
-                    max: 100,
-                    grid: { color: '#e2e8f0' }
-                },
-                x: {
-                    grid: { display: false }
-                }
+                y: { beginAtZero: true, max: 100, grid: { color: '#e2e8f0' } },
+                x: { grid: { display: false } }
             }
         }
     });
@@ -1120,17 +1191,9 @@ function renderProgressChart(data, studentFilter) {
 function renderDistributionChart(data) {
     const ctx = document.getElementById('distributionChart').getContext('2d');
     
-    if (distributionChart) {
-        distributionChart.destroy();
-    }
+    if (distributionChart) distributionChart.destroy();
     
-    const ranges = {
-        '90-100': 0,
-        '80-89': 0,
-        '70-79': 0,
-        '60-69': 0,
-        'أقل من 60': 0
-    };
+    const ranges = { '90-100': 0, '80-89': 0, '70-79': 0, '60-69': 0, 'أقل من 60': 0 };
     
     data.forEach(r => {
         const s = r.score;
@@ -1148,13 +1211,7 @@ function renderDistributionChart(data) {
             datasets: [{
                 label: 'عدد الاختبارات',
                 data: Object.values(ranges),
-                backgroundColor: [
-                    '#10b981',
-                    '#34d399',
-                    '#f59e0b',
-                    '#f97316',
-                    '#ef4444'
-                ],
+                backgroundColor: ['#10b981', '#34d399', '#f59e0b', '#f97316', '#ef4444'],
                 borderRadius: 8,
                 borderSkipped: false
             }]
@@ -1162,17 +1219,10 @@ function renderDistributionChart(data) {
         options: {
             responsive: true,
             maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
+            plugins: { legend: { display: false } },
             scales: {
-                y: {
-                    beginAtZero: true,
-                    ticks: { stepSize: 1 }
-                },
-                x: {
-                    grid: { display: false }
-                }
+                y: { beginAtZero: true, ticks: { stepSize: 1 } },
+                x: { grid: { display: false } }
             }
         }
     });
@@ -1182,7 +1232,6 @@ function renderStudentsList(data) {
     const container = document.getElementById('studentsList');
     container.innerHTML = '';
     
-    // تجميع حسب الطالب (آخر نتيجة لكل طالب)
     const studentMap = {};
     data.forEach(r => {
         if (!studentMap[r.name] || new Date(r.date) > new Date(studentMap[r.name].date)) {
@@ -1217,10 +1266,11 @@ function renderStudentsList(data) {
 }
 
 // ==================== INITIALIZATION ====================
-document.addEventListener('DOMContentLoaded', function() {
-    loadQuizData();
+document.addEventListener('DOMContentLoaded', async function() {
+    // تحميل البيانات من SheetDB
+    await loadQuizData();
     
-    // استعادة بيانات الطالب إن وجدت
+    // استعادة بيانات الطالب
     const savedStudent = localStorage.getItem('currentStudent');
     if (savedStudent) {
         try {
@@ -1230,11 +1280,9 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch(e) {}
     }
     
-    // إغلاق المودال بالزر Escape
+    // إغلاق المودال بالEscape
     document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') {
-            closeTeacherModal();
-        }
+        if (e.key === 'Escape') closeTeacherModal();
     });
 });
 </script>
