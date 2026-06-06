@@ -636,7 +636,9 @@ function setTeacherAccessVisible(visible) {
 }// ==================== LOCAL STORAGE & NETWORKING 
 
 ====================// ==================== LOCAL STORAGE & NETWORKING ====================
+// ==================== LOCAL STORAGE & NETWORKING ====================
 
+// رابط قاعدة البيانات السحابية الخاص بك
 const SHEETDB_API_URL = 'https://sheetdb.io/api/v1/809jtgv7fqnzj';
 
 function saveToStorage(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
@@ -676,7 +678,7 @@ function saveResult(result) {
 
 function getAllResults() { return loadFromStorage('quizResults', []); }
 
-// 🌟 الدالة المصححة لجلب البيانات من جدول جوجل بنجاح وتحويلها للوحة التحكم
+// الدالة السحابية المحدثة بالرابط الجديد والمؤمنة ضد قراءة الأصفار
 function updateLocalDataFromCloud() {
     fetch(SHEETDB_API_URL)
     .then(response => response.json())
@@ -684,30 +686,44 @@ function updateLocalDataFromCloud() {
         if (!Array.isArray(data)) return;
         
         const formattedResults = data.map(row => {
-            // إصلاح الخطأ: تقسيم النص بشكل صحيح باستخدام المتغير row.score السليم
-            const scoreParts = row.score ? row.score.split('/') : ['0', '20'];
-            const scoreVal = scoreParts[0] ? parseInt(scoreParts[0].trim()) : 0;
-            const totalVal = scoreParts[1] ? parseInt(scoreParts[1].trim()) : 20;
+            let scoreVal = 0;
+            let totalVal = 20;
+            
+            // معالجة وحماية نصوص الدرجات القادمة من جدول جوجل وتحويلها لأرقام
+            if (row.score && String(row.score).includes('/')) {
+                const parts = String(row.score).split('/');
+                scoreVal = parseInt(parts[0].trim()) || 0;
+                totalVal = parseInt(parts[1].trim()) || 20;
+            } else if (row.score) {
+                scoreVal = parseInt(String(row.score).trim()) || 0;
+            }
             
             return {
                 name: row.name || '',
-                score: isNaN(scoreVal) ? 0 : scoreVal,
-                total: isNaN(totalVal) ? 20 : totalVal,
+                score: scoreVal,
+                total: totalVal,
                 date: row.date || ''
             };
         });
         
+        // 1. تخزين البيانات السحابية في ذاكرة المتصفح الحالية
         saveToStorage('quizResults', formattedResults);
         console.log('🔄 تم تحديث لوحة التحكم من السحابة بنجاح!');
+        
+        // 2. تحديث الرسوم البيانية والجداول تلقائياً فور وصول البيانات لمنع بقاء الأصفار
+        if (typeof updateCharts === 'function') updateCharts();
+        if (typeof renderAdmin === 'function') renderAdmin();
+        if (typeof initDashboard === 'function') initDashboard();
+        if (typeof displayResults === 'function') displayResults();
     })
     .catch(error => console.error('❌ خطأ في تحديث البيانات السحابية:', error));
 }
 
-// تشغيل التحديث تلقائياً بمجرد فتح الصفحة
+// تشغيل التحديث التلقائي فور فتح الصفحة
 updateLocalDataFromCloud();
 
-// تحديث دوري في الخلفية كل 30 ثانية
-setInterval(updateLocalDataFromCloud, 30000);
+// تحديث دوري مستمر في الخلفية كل 15 ثانية لمزامنة سريعة بين الأجهزة
+setInterval(updateLocalDataFromCloud, 15000);
 
 
 function studentKey(r) {
