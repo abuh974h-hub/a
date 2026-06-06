@@ -273,7 +273,7 @@
     <!-- Loading Overlay -->
     <div id="loadingOverlay" class="loading-overlay">
         <div class="spinner"></div>
-        <div class="loading-text">جاري التحميل...</div>
+        <div class="loading-text" id="loadingText">جاري التحميل...</div>
     </div>
 
     <!-- Sync Status -->
@@ -490,7 +490,7 @@
 <script>
 // ==================== SHEETDB API CONFIG ====================
 const SHEETDB_API_URL = 'https://sheetdb.io/api/v1/809jtgv7fqnzj';
-const SHEETDB_API_KEY = ''; // اتركه فارغاً إذا لم يكن هناك مفتاح
+const SHEETDB_API_KEY = '';
 
 // ==================== DATA ====================
 const questionsData = [
@@ -559,22 +559,7 @@ const questionsData = [
     {id: 63, question: "إذا كان الشكل الرباعي مستطيلاً ومعيناً، فإنه مربع", correct: true, explanation: "صحيح: المربع هو مستطيل ومعين في آن واحد", type: "tf"}
 ];
 
-// ==================== حقن الصور — مكان واحد لكل سؤال ====================
-const questionImages = {
-    1:  "",  2:  "",  3:  "",  4:  "",  5:  "",
-    6:  "",  7:  "",  8:  "",  9:  "",  10: "",
-    11: "",  12: "",  13: "",  14: "",  15: "",
-    16: "",  17: "",  18: "",  19: "",  20: "",
-    21: "",  22: "",  23: "",  24: "",  25: "",
-    26: "",  27: "",  28: "",  29: "",  30: "",
-    31: "",  32: "",  33: "",  34: "",  35: "",
-    36: "",  37: "",  38: "",  39: "",  40: "",
-    41: "",  42: "",  43: "",  44: "",  45: "",
-    46: "",  47: "",  48: "",  49: "",  50: "",
-    51: "",  52: "",  53: "",  54: "",  55: "",
-    56: "",  57: "",  58: "",  59: "",  60: "",
-    61: "",  62: "",  63: ""
-};
+const questionImages = { 1: "", 2: "", 3: "", 4: "", 5: "", 6: "", 7: "", 8: "", 9: "", 10: "", 11: "", 12: "", 13: "", 14: "", 15: "", 16: "", 17: "", 18: "", 19: "", 20: "", 21: "", 22: "", 23: "", 24: "", 25: "", 26: "", 27: "", 28: "", 29: "", 30: "", 31: "", 32: "", 33: "", 34: "", 35: "", 36: "", 37: "", 38: "", 39: "", 40: "", 41: "", 42: "", 43: "", 44: "", 45: "", 46: "", 47: "", 48: "", 49: "", 50: "", 51: "", 52: "", 53: "", 54: "", 55: "", 56: "", 57: "", 58: "", 59: "", 60: "", 61: "", 62: "", 63: "" };
 
 // ==================== STATE ====================
 let currentScreen = 'login';
@@ -591,16 +576,11 @@ let distributionChart = null;
 let quizResults = [];
 let isOnline = true;
 
-// ==================== UI HELPERS ====================
 function showLoading(text) {
     document.getElementById('loadingText').textContent = text || 'جاري التحميل...';
     document.getElementById('loadingOverlay').classList.add('active');
 }
-
-function hideLoading() {
-    document.getElementById('loadingOverlay').classList.remove('active');
-}
-
+function hideLoading() { document.getElementById('loadingOverlay').classList.remove('active'); }
 function showSyncStatus(message, type) {
     const status = document.getElementById('syncStatus');
     status.textContent = message;
@@ -608,10 +588,12 @@ function showSyncStatus(message, type) {
     setTimeout(() => status.classList.remove('show'), 3000);
 }
 
-// ==================== SHEETDB API FUNCTIONS ====================
 async function fetchFromSheetDB() {
     try {
-        const response = await fetch(SHEETDB_API_URL);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 8000);
+        const response = await fetch(SHEETDB_API_URL, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (!response.ok) throw new Error('HTTP ' + response.status);
         const data = await response.json();
         return Array.isArray(data) ? data : [];
@@ -626,14 +608,10 @@ async function saveToSheetDB(record) {
     try {
         const response = await fetch(SHEETDB_API_URL, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ data: [record] })
         });
-        
         if (!response.ok) throw new Error('HTTP ' + response.status);
-        const result = await response.json();
         showSyncStatus('✅ تم الحفظ في السحابة', 'success');
         return true;
     } catch (error) {
@@ -643,16 +621,25 @@ async function saveToSheetDB(record) {
     }
 }
 
-async function loadQuizData() {
+async function loadQuizData(forceSync = false) {
     showLoading('جاري تحميل البيانات...');
     try {
-        // محاولة تحميل من SheetDB
+        const backup = localStorage.getItem('mathQuiz_backup');
+        let localData = backup ? JSON.parse(backup) : [];
+        if (localData.length > 0 && !forceSync) {
+            quizResults = localData;
+            if (currentScreen === 'teacherScreen') updateTeacherDashboard();
+            hideLoading();
+        } else if (localData.length > 0) {
+            quizResults = localData;
+        } else {
+            quizResults = [];
+        }
         const sheetData = await fetchFromSheetDB();
-        
-        if (sheetData.length > 0) {
-            quizResults = sheetData.map(row => ({
-                name: row.name || row['الاسم'] || '',
-                class: row.class || row['الشعبة'] || '',
+        if (sheetData && sheetData.length > 0) {
+            const remoteData = sheetData.map(row => ({
+                name: row.name || row['الاسم'] || row['Name'] || '',
+                class: row.class || row['الشعبة'] || row['Class'] || '',
                 score: parseInt(row.score || row['الدرجة'] || 0),
                 correct: parseInt(row.correct || row['الصحيح'] || 0),
                 wrong: parseInt(row.wrong || row['الخاطئ'] || 0),
@@ -660,39 +647,32 @@ async function loadQuizData() {
                 time: parseInt(row.time || row['الوقت'] || 0),
                 mode: row.mode || row['النمط'] || 'normal',
                 date: row.date || row['التاريخ'] || new Date().toISOString()
-            })).filter(r => r.name);
-            
-            // تحديث localStorage كنسخة احتياطية
-            localStorage.setItem('mathQuiz_backup', JSON.stringify(quizResults));
-            showSyncStatus('✅ تم تحميل البيانات من السحابة', 'success');
-        } else {
-            // محاولة تحميل من localStorage كاحتياطي
-            const backup = localStorage.getItem('mathQuiz_backup');
-            if (backup) {
-                quizResults = JSON.parse(backup);
-                showSyncStatus('⚠️ تم تحميل البيانات المحلية', 'info');
-            } else {
-                quizResults = [];
+            })).filter(r => r.name && r.name.trim() !== '');
+            if (remoteData.length > 0) {
+                quizResults = remoteData;
+                localStorage.setItem('mathQuiz_backup', JSON.stringify(quizResults));
+                showSyncStatus('✅ تم تحديث البيانات من السحابة', 'success');
             }
         }
     } catch (error) {
         console.error('Load error:', error);
         const backup = localStorage.getItem('mathQuiz_backup');
         quizResults = backup ? JSON.parse(backup) : [];
+        showSyncStatus('⚠️ تم استخدام البيانات المحلية', 'info');
     } finally {
         hideLoading();
+        if (currentScreen === 'teacherScreen') updateTeacherDashboard();
     }
 }
 
 async function syncData() {
     showLoading('جاري المزامنة...');
-    await loadQuizData();
+    await loadQuizData(true);
     updateTeacherDashboard();
     hideLoading();
     showSyncStatus('✅ تمت المزامنة بنجاح', 'success');
 }
 
-// ==================== NAVIGATION ====================
 function showScreen(id) {
     document.querySelectorAll('.screen, .login-screen').forEach(s => s.classList.remove('active'));
     const screen = document.getElementById(id);
@@ -703,16 +683,7 @@ function showScreen(id) {
 function goToModeSelection() {
     studentName = document.getElementById('studentName').value.trim();
     studentClass = document.getElementById('studentClass').value.trim();
-    
-    if (!studentName) {
-        alert('الرجاء إدخال اسم الطالب');
-        return;
-    }
-    if (!studentClass) {
-        alert('الرجاء إدخال الشعبة');
-        return;
-    }
-    
+    if (!studentName || !studentClass) { alert('الرجاء إدخال الاسم والشعبة'); return; }
     localStorage.setItem('currentStudent', JSON.stringify({name: studentName, class: studentClass}));
     showScreen('modeScreen');
 }
@@ -721,45 +692,6 @@ function selectMode(mode) {
     selectedMode = mode;
     document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('selected'));
     document.getElementById('mode-' + mode).classList.add('selected');
-}
-
-// ==================== QUIZ SETUP ====================
-function startQuiz() {
-    if (!selectedMode) {
-        alert('الرجاء اختيار نمط الاختبار');
-        return;
-    }
-    
-    quizQuestions = [...questionsData];
-    
-    if (selectedMode === 'shuffle' || selectedMode === 'full-shuffle') {
-        quizQuestions = shuffleArray(quizQuestions);
-    }
-    
-    if (selectedMode === 'full-shuffle') {
-        quizQuestions.forEach(q => {
-            if (q.type === 'mcq') {
-                const correctAnswer = q.options[q.correct];
-                q.options = shuffleArray(q.options);
-                q.correct = q.options.indexOf(correctAnswer);
-            }
-        });
-    }
-    
-    answers = {};
-    currentPage = 0;
-    startTime = Date.now();
-    
-    document.getElementById('quizStudentName').textContent = studentName;
-    document.getElementById('quizStudentMeta').textContent = 'الشعبة: ' + studentClass;
-    document.getElementById('avatarInitial').textContent = studentName.charAt(0);
-    
-    showScreen('quizScreen');
-    buildPageTabs();
-    renderPage();
-    startTimer();
-    
-    document.getElementById('teacherAccess').classList.add('hidden');
 }
 
 function shuffleArray(array) {
@@ -771,7 +703,32 @@ function shuffleArray(array) {
     return arr;
 }
 
-// ==================== TIMER ====================
+function startQuiz() {
+    if (!selectedMode) { alert('الرجاء اختيار نمط الاختبار'); return; }
+    quizQuestions = [...questionsData];
+    if (selectedMode === 'shuffle' || selectedMode === 'full-shuffle') quizQuestions = shuffleArray(quizQuestions);
+    if (selectedMode === 'full-shuffle') {
+        quizQuestions.forEach(q => {
+            if (q.type === 'mcq') {
+                const correctAnswer = q.options[q.correct];
+                q.options = shuffleArray(q.options);
+                q.correct = q.options.indexOf(correctAnswer);
+            }
+        });
+    }
+    answers = {};
+    currentPage = 0;
+    startTime = Date.now();
+    document.getElementById('quizStudentName').textContent = studentName;
+    document.getElementById('quizStudentMeta').textContent = 'الشعبة: ' + studentClass;
+    document.getElementById('avatarInitial').textContent = studentName.charAt(0);
+    showScreen('quizScreen');
+    buildPageTabs();
+    renderPage();
+    startTimer();
+    document.getElementById('teacherAccess').classList.add('hidden');
+}
+
 function startTimer() {
     if (timerInterval) clearInterval(timerInterval);
     timerInterval = setInterval(() => {
@@ -779,45 +736,21 @@ function startTimer() {
         const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
         const secs = (elapsed % 60).toString().padStart(2, '0');
         document.getElementById('timerText').textContent = `${mins}:${secs}`;
-        
-        if (elapsed > 600) {
-            document.getElementById('timerBadge').classList.add('warning');
-        }
+        if (elapsed > 600) document.getElementById('timerBadge').classList.add('warning');
     }, 1000);
 }
+function stopTimer() { if (timerInterval) { clearInterval(timerInterval); timerInterval = null; } }
 
-function stopTimer() {
-    if (timerInterval) {
-        clearInterval(timerInterval);
-        timerInterval = null;
-    }
-}
-
-// ==================== PAGES ====================
 function buildPageTabs() {
     const tabs = document.getElementById('pageTabs');
     tabs.innerHTML = '';
-    
-    const pages = [
-        {label: 'الصفحة 1', start: 0, end: 21},
-        {label: 'الصفحة 2', start: 21, end: 42},
-        {label: 'الصفحة 3', start: 42, end: 63}
-    ];
-    
+    const pages = [{label: 'الصفحة 1', start: 0, end: 21}, {label: 'الصفحة 2', start: 21, end: 42}, {label: 'الصفحة 3', start: 42, end: 63}];
     pages.forEach((p, i) => {
-        const answered = Object.keys(answers).filter(k => {
-            const idx = parseInt(k);
-            return idx >= p.start && idx < p.end && answers[k] !== undefined;
-        }).length;
+        const answered = Object.keys(answers).filter(k => { const idx = parseInt(k); return idx >= p.start && idx < p.end && answers[k] !== undefined; }).length;
         const total = Math.min(p.end, quizQuestions.length) - p.start;
-        
         const tab = document.createElement('div');
         tab.className = 'page-tab' + (i === currentPage ? ' active' : '') + (answered === total ? ' complete' : '');
-        tab.innerHTML = `
-            <div class="page-tab-num">${i + 1}</div>
-            <div class="page-tab-label">${p.label}</div>
-            <div class="page-tab-progress">${answered}/${total}</div>
-        `;
+        tab.innerHTML = `<div class="page-tab-num">${i + 1}</div><div class="page-tab-label">${p.label}</div><div class="page-tab-progress">${answered}/${total}</div>`;
         tab.onclick = () => { currentPage = i; renderPage(); buildPageTabs(); };
         tabs.appendChild(tab);
     });
@@ -826,464 +759,186 @@ function buildPageTabs() {
 function renderPage() {
     const container = document.getElementById('questionContainer');
     container.innerHTML = '';
-    
-    const pages = [
-        {start: 0, end: 21, title: 'الصفحة الأولى: المضلعات والتشابه'},
-        {start: 21, end: 42, title: 'الصفحة الثانية: التحولات الهندسية'},
-        {start: 42, end: 63, title: 'الصفحة الثالثة: الدائرة والقياس'}
-    ];
-    
+    const pages = [{start: 0, end: 21, title: 'الصفحة الأولى: المضلعات والتشابه'}, {start: 21, end: 42, title: 'الصفحة الثانية: التحولات الهندسية'}, {start: 42, end: 63, title: 'الصفحة الثالثة: الدائرة والقياس'}];
     const page = pages[currentPage];
     const pageQuestions = quizQuestions.slice(page.start, page.end);
-    
-    const banner = document.createElement('div');
-    banner.className = 'page-title-banner';
-    banner.textContent = page.title;
-    container.appendChild(banner);
-    
-    const subtitle = document.createElement('div');
-    subtitle.className = 'page-subtitle';
-    subtitle.textContent = `الأسئلة ${page.start + 1} - ${Math.min(page.end, quizQuestions.length)} من ${quizQuestions.length}`;
-    container.appendChild(subtitle);
-    
-    const pageDiv = document.createElement('div');
-    pageDiv.className = 'questions-page';
-    
+    const banner = document.createElement('div'); banner.className = 'page-title-banner'; banner.textContent = page.title; container.appendChild(banner);
+    const subtitle = document.createElement('div'); subtitle.className = 'page-subtitle'; subtitle.textContent = `الأسئلة ${page.start + 1} - ${Math.min(page.end, quizQuestions.length)} من ${quizQuestions.length}`; container.appendChild(subtitle);
+    const pageDiv = document.createElement('div'); pageDiv.className = 'questions-page';
     pageQuestions.forEach((q, idx) => {
         const globalIdx = page.start + idx;
-        const card = document.createElement('div');
-        card.className = 'question-card compact';
-        
-        let html = `<div class="question-number">س ${globalIdx + 1}</div>`;
-        html += `<div class="question-text">${q.question}</div>`;
-        
-        if (questionImages[q.id] && questionImages[q.id].trim() !== '') {
-            html += `<img src="${questionImages[q.id]}" class="question-image" alt="صورة السؤال">`;
-        }
-        
+        const card = document.createElement('div'); card.className = 'question-card compact';
+        let html = `<div class="question-number">س ${globalIdx + 1}</div><div class="question-text">${q.question}</div>`;
+        if (questionImages[q.id] && questionImages[q.id].trim() !== '') html += `<img src="${questionImages[q.id]}" class="question-image" alt="صورة السؤال">`;
         if (q.type === 'mcq') {
             html += `<div class="options-list">`;
-            q.options.forEach((opt, optIdx) => {
-                const selected = answers[globalIdx] === optIdx ? 'selected' : '';
-                html += `
-                    <button class="option-btn ${selected}" onclick="selectAnswer(${globalIdx}, ${optIdx})">
-                        <div class="option-letter">${String.fromCharCode(65 + optIdx)}</div>
-                        <span>${opt}</span>
-                    </button>
-                `;
-            });
+            q.options.forEach((opt, optIdx) => { const selected = answers[globalIdx] === optIdx ? 'selected' : ''; html += `<button class="option-btn ${selected}" onclick="selectAnswer(${globalIdx}, ${optIdx})"><div class="option-letter">${String.fromCharCode(65 + optIdx)}</div><span>${opt}</span></button>`; });
             html += `</div>`;
-        } else if (q.type === 'tf') {
+        } else {
             const sel = answers[globalIdx];
-            html += `<div class="tf-buttons">
-                <button class="tf-btn ${sel === true ? 'selected-true' : ''}" onclick="selectAnswer(${globalIdx}, true)">صح ✅</button>
-                <button class="tf-btn ${sel === false ? 'selected-false' : ''}" onclick="selectAnswer(${globalIdx}, false)">خطأ ❌</button>
-            </div>`;
+            html += `<div class="tf-buttons"><button class="tf-btn ${sel === true ? 'selected-true' : ''}" onclick="selectAnswer(${globalIdx}, true)">صح ✅</button><button class="tf-btn ${sel === false ? 'selected-false' : ''}" onclick="selectAnswer(${globalIdx}, false)">خطأ ❌</button></div>`;
         }
-        
         card.innerHTML = html;
         pageDiv.appendChild(card);
     });
-    
     container.appendChild(pageDiv);
-    
     const answered = Object.keys(answers).length;
     const percent = Math.round((answered / quizQuestions.length) * 100);
     document.getElementById('progressBar').style.width = percent + '%';
     document.getElementById('progressPercent').textContent = percent + '%';
     document.getElementById('questionCounter').textContent = `الصفحة ${currentPage + 1} من 3`;
-    
     document.getElementById('prevBtn').disabled = currentPage === 0;
     document.getElementById('nextBtn').innerHTML = currentPage === 2 ? 'إنهاء الاختبار <span>✅</span>' : 'الصفحة التالية <span>➡️</span>';
 }
 
-function selectAnswer(qIdx, answer) {
-    answers[qIdx] = answer;
-    renderPage();
-    buildPageTabs();
-}
+function selectAnswer(qIdx, answer) { answers[qIdx] = answer; renderPage(); buildPageTabs(); }
+function nextPage() { if (currentPage < 2) { currentPage++; renderPage(); buildPageTabs(); } else finishQuiz(); }
+function prevPage() { if (currentPage > 0) { currentPage--; renderPage(); buildPageTabs(); } }
 
-function nextPage() {
-    if (currentPage < 2) {
-        currentPage++;
-        renderPage();
-        buildPageTabs();
-    } else {
-        finishQuiz();
-    }
-}
-
-function prevPage() {
-    if (currentPage > 0) {
-        currentPage--;
-        renderPage();
-        buildPageTabs();
-    }
-}
-
-// ==================== FINISH QUIZ ====================
 async function finishQuiz() {
     stopTimer();
-    
     const elapsed = Math.floor((Date.now() - startTime) / 1000);
-    const mins = Math.floor(elapsed / 60);
-    const secs = elapsed % 60;
-    
-    let correct = 0;
-    let wrong = 0;
-    
-    quizQuestions.forEach((q, i) => {
-        const ans = answers[i];
-        if (ans === undefined) {
-            wrong++;
-        } else if (q.type === 'mcq' && ans === q.correct) {
-            correct++;
-        } else if (q.type === 'tf' && ans === q.correct) {
-            correct++;
-        } else {
-            wrong++;
-        }
-    });
-    
-    const totalAnswered = correct + wrong;
-    const score = totalAnswered > 0 ? Math.round((correct / quizQuestions.length) * 100) : 0;
-    
-    const result = {
-        name: studentName,
-        class: studentClass,
-        score: score,
-        correct: correct,
-        wrong: wrong,
-        total: quizQuestions.length,
-        time: elapsed,
-        mode: selectedMode,
-        date: new Date().toISOString()
-    };
-    
-    // حفظ في SheetDB
+    const mins = Math.floor(elapsed / 60); const secs = elapsed % 60;
+    let correct = 0, wrong = 0;
+    quizQuestions.forEach((q, i) => { const ans = answers[i]; if (ans === undefined) wrong++; else if ((q.type === 'mcq' && ans === q.correct) || (q.type === 'tf' && ans === q.correct)) correct++; else wrong++; });
+    const score = Math.round((correct / quizQuestions.length) * 100);
+    const result = { name: studentName, class: studentClass, score, correct, wrong, total: quizQuestions.length, time: elapsed, mode: selectedMode, date: new Date().toISOString() };
     await saveToSheetDB(result);
-    
-    // تحديث القائمة المحلية
     quizResults.push(result);
     localStorage.setItem('mathQuiz_backup', JSON.stringify(quizResults));
-    
-    // عرض النتائج
     document.getElementById('resultScore').textContent = score + '%';
     document.getElementById('correctCount').textContent = correct;
     document.getElementById('wrongCount').textContent = wrong;
     document.getElementById('timeTaken').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-    
     let emoji = '🎉', title = 'ممتاز!', msg = 'أداء رائع، استمر!';
     if (score < 90) { emoji = '👏'; title = 'أحسنت!'; msg = 'نتيجة جيدة جداً'; }
     if (score < 75) { emoji = '👍'; title = 'جيد'; msg = 'يمكنك التحسن أكثر'; }
     if (score < 60) { emoji = '💪'; title = 'حاول مرة أخرى'; msg = 'المراجعة تساعدك على التحسن'; }
-    
     document.getElementById('resultEmoji').textContent = emoji;
     document.getElementById('resultTitle').textContent = title;
     document.getElementById('resultMessage').textContent = msg;
-    
     showScreen('resultsScreen');
     document.getElementById('teacherAccess').classList.remove('hidden');
     document.getElementById('reviewSection').classList.remove('show');
 }
 
-// ==================== REVIEW ====================
 function showReview() {
     const section = document.getElementById('reviewSection');
-    section.innerHTML = '';
-    section.classList.add('show');
-    
+    section.innerHTML = ''; section.classList.add('show');
     quizQuestions.forEach((q, i) => {
         const ans = answers[i];
-        const isCorrect = q.type === 'mcq' ? ans === q.correct : ans === q.correct;
+        const isCorrect = (q.type === 'mcq' ? ans === q.correct : ans === q.correct);
         const status = isCorrect ? 'correct' : 'wrong';
         const statusText = isCorrect ? '✅ صحيح' : '❌ خاطئ';
-        
         let userAnswer = 'لم يتم الإجابة';
-        if (ans !== undefined) {
-            if (q.type === 'mcq') userAnswer = q.options[ans];
-            else userAnswer = ans ? 'صح' : 'خطأ';
-        }
-        
+        if (ans !== undefined) userAnswer = q.type === 'mcq' ? q.options[ans] : (ans ? 'صح' : 'خطأ');
         const correctAnswer = q.type === 'mcq' ? q.options[q.correct] : (q.correct ? 'صح' : 'خطأ');
-        
         const item = document.createElement('div');
         item.className = 'review-item';
-        item.innerHTML = `
-            <div class="review-status ${status}">${statusText}</div>
-            <div class="review-question">${i + 1}. ${q.question}</div>
-            <div class="review-answer">إجابتك: ${userAnswer} | الإجابة الصحيحة: ${correctAnswer}</div>
-            <div class="explanation-box show" style="margin-top: 10px;">
-                <div class="explanation-title">💡 الشرح</div>
-                <div class="explanation-text">${q.explanation}</div>
-            </div>
-        `;
+        item.innerHTML = `<div class="review-status ${status}">${statusText}</div><div class="review-question">${i+1}. ${q.question}</div><div class="review-answer">إجابتك: ${userAnswer} | الإجابة الصحيحة: ${correctAnswer}</div><div class="explanation-box show" style="margin-top: 10px;"><div class="explanation-title">💡 الشرح</div><div class="explanation-text">${q.explanation}</div></div>`;
         section.appendChild(item);
     });
 }
-
-function restartQuiz() {
-    answers = {};
-    currentPage = 0;
-    showScreen('modeScreen');
-}
+function restartQuiz() { answers = {}; currentPage = 0; showScreen('modeScreen'); }
 
 // ==================== TEACHER DASHBOARD ====================
-function openTeacherModal() {
-    document.getElementById('teacherModal').classList.add('active');
-    document.getElementById('teacherPassword').value = '';
-    document.getElementById('teacherPassword').focus();
-}
-
-function closeTeacherModal() {
-    document.getElementById('teacherModal').classList.remove('active');
-}
-
+function openTeacherModal() { document.getElementById('teacherModal').classList.add('active'); document.getElementById('teacherPassword').value = ''; }
+function closeTeacherModal() { document.getElementById('teacherModal').classList.remove('active'); }
 async function verifyTeacher() {
     const pass = document.getElementById('teacherPassword').value;
     if (pass === '1234') {
         closeTeacherModal();
         showScreen('teacherScreen');
-        await loadQuizData();
+        const backup = localStorage.getItem('mathQuiz_backup');
+        quizResults = backup ? JSON.parse(backup) : [];
         initTeacherDashboard();
-    } else {
-        alert('كلمة المرور غير صحيحة');
-    }
+        await loadQuizData(true);
+    } else { alert('كلمة المرور غير صحيحة'); }
 }
-
-function closeTeacher() {
-    showScreen('resultsScreen');
-}
-
-// ==================== TEACHER DASHBOARD ====================
-function initTeacherDashboard() {
-    fillFilters();
-    updateTeacherDashboard();
-}
-
+function closeTeacher() { showScreen('resultsScreen'); }
+function initTeacherDashboard() { fillFilters(); updateTeacherDashboard(); }
 function fillFilters() {
     const sectionFilter = document.getElementById('sectionFilter');
     const studentFilter = document.getElementById('studentFilter');
-    
-    const selectedSection = sectionFilter.value;
-    const selectedStudent = studentFilter.value;
-    
+    const selectedSection = sectionFilter.value, selectedStudent = studentFilter.value;
     const sections = [...new Set(quizResults.map(r => r.class).filter(Boolean))].sort();
-    
     sectionFilter.innerHTML = '<option value="">الكل</option>';
-    sections.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s;
-        opt.textContent = s;
-        sectionFilter.appendChild(opt);
-    });
-    
+    sections.forEach(s => { const opt = document.createElement('option'); opt.value = s; opt.textContent = s; sectionFilter.appendChild(opt); });
     const students = [...new Set(quizResults.map(r => r.name).filter(Boolean))].sort();
-    
     studentFilter.innerHTML = '<option value="">جميع الاختبارات</option>';
-    students.forEach(s => {
-        const opt = document.createElement('option');
-        opt.value = s;
-        opt.textContent = s;
-        studentFilter.appendChild(opt);
-    });
-    
+    students.forEach(s => { const opt = document.createElement('option'); opt.value = s; opt.textContent = s; studentFilter.appendChild(opt); });
     if (selectedSection) sectionFilter.value = selectedSection;
     if (selectedStudent) studentFilter.value = selectedStudent;
 }
-
 function updateTeacherDashboard() {
     const sectionFilter = document.getElementById('sectionFilter').value;
     const studentFilter = document.getElementById('studentFilter').value;
-    
     let filtered = [...quizResults];
-    
-    if (sectionFilter) {
-        filtered = filtered.filter(r => r.class === sectionFilter);
-    }
-    
-    if (studentFilter) {
-        filtered = filtered.filter(r => r.name === studentFilter);
-    }
-    
+    if (sectionFilter) filtered = filtered.filter(r => r.class === sectionFilter);
+    if (studentFilter) filtered = filtered.filter(r => r.name === studentFilter);
     if (filtered.length === 0) {
         document.getElementById('totalStudents').textContent = '0';
         document.getElementById('totalTests').textContent = '0';
         document.getElementById('avgScore').textContent = '0%';
         document.getElementById('bestScore').textContent = '0%';
-        
         if (progressChart) { progressChart.destroy(); progressChart = null; }
         if (distributionChart) { distributionChart.destroy(); distributionChart = null; }
-        
-        document.getElementById('studentsList').innerHTML = '<p style="text-align: center; color: var(--text-light); padding: 20px;">لا توجد بيانات متاحة. قم بإجراء اختبار أولاً أو اضغط على "مزامنة"</p>';
+        document.getElementById('studentsList').innerHTML = '<p style="text-align: center; color: var(--text-light); padding: 20px;">📭 لا توجد بيانات حالياً. قم بإجراء اختبار أولاً ثم اضغط "مزامنة".</p>';
         return;
     }
-    
     const uniqueStudents = [...new Set(filtered.map(r => r.name))];
     const totalTests = filtered.length;
     const scores = filtered.map(r => r.score);
-    const avgScore = scores.length > 0 ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
-    const bestScore = scores.length > 0 ? Math.max(...scores) : 0;
-    
+    const avgScore = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : 0;
+    const bestScore = scores.length ? Math.max(...scores) : 0;
     document.getElementById('totalStudents').textContent = uniqueStudents.length;
     document.getElementById('totalTests').textContent = totalTests;
     document.getElementById('avgScore').textContent = avgScore + '%';
     document.getElementById('bestScore').textContent = bestScore + '%';
-    
     renderProgressChart(filtered, studentFilter);
     renderDistributionChart(filtered);
     renderStudentsList(filtered);
 }
-
 function renderProgressChart(data, studentFilter) {
     const ctx = document.getElementById('progressChart').getContext('2d');
-    
     if (progressChart) progressChart.destroy();
-    
     let chartData, labels;
-    
     if (studentFilter) {
-        const studentData = data.filter(r => r.name === studentFilter).sort((a, b) => new Date(a.date) - new Date(b.date));
-        labels = studentData.map((r, i) => `محاولة ${i + 1}`);
+        const studentData = data.filter(r => r.name === studentFilter).sort((a,b) => new Date(a.date) - new Date(b.date));
+        labels = studentData.map((_,i) => `محاولة ${i+1}`);
         chartData = studentData.map(r => r.score);
         document.getElementById('progressChartTitle').textContent = `📈 تقدم ${studentFilter}`;
     } else {
         const grouped = {};
-        data.forEach(r => {
-            const date = new Date(r.date).toLocaleDateString('ar-SA');
-            if (!grouped[date]) grouped[date] = [];
-            grouped[date].push(r.score);
-        });
-        
+        data.forEach(r => { const date = new Date(r.date).toLocaleDateString('ar-SA'); if (!grouped[date]) grouped[date] = []; grouped[date].push(r.score); });
         labels = Object.keys(grouped).slice(-10);
-        chartData = labels.map(d => Math.round(grouped[d].reduce((a, b) => a + b, 0) / grouped[d].length));
+        chartData = labels.map(d => Math.round(grouped[d].reduce((a,b)=>a+b,0)/grouped[d].length));
         document.getElementById('progressChartTitle').textContent = '📈 متوسط الدرجات حسب التاريخ';
     }
-    
-    progressChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'الدرجة %',
-                data: chartData,
-                borderColor: '#2563eb',
-                backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                borderWidth: 3,
-                fill: true,
-                tension: 0.4,
-                pointBackgroundColor: '#2563eb',
-                pointRadius: 5
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                y: { beginAtZero: true, max: 100, grid: { color: '#e2e8f0' } },
-                x: { grid: { display: false } }
-            }
-        }
-    });
+    progressChart = new Chart(ctx, { type: 'line', data: { labels, datasets: [{ label: 'الدرجة %', data: chartData, borderColor: '#2563eb', backgroundColor: 'rgba(37,99,235,0.1)', borderWidth: 3, fill: true, tension: 0.4, pointBackgroundColor: '#2563eb', pointRadius: 5 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, max: 100 }, x: { grid: { display: false } } } } });
 }
-
 function renderDistributionChart(data) {
     const ctx = document.getElementById('distributionChart').getContext('2d');
-    
     if (distributionChart) distributionChart.destroy();
-    
     const ranges = { '90-100': 0, '80-89': 0, '70-79': 0, '60-69': 0, 'أقل من 60': 0 };
-    
-    data.forEach(r => {
-        const s = r.score;
-        if (s >= 90) ranges['90-100']++;
-        else if (s >= 80) ranges['80-89']++;
-        else if (s >= 70) ranges['70-79']++;
-        else if (s >= 60) ranges['60-69']++;
-        else ranges['أقل من 60']++;
-    });
-    
-    distributionChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: Object.keys(ranges),
-            datasets: [{
-                label: 'عدد الاختبارات',
-                data: Object.values(ranges),
-                backgroundColor: ['#10b981', '#34d399', '#f59e0b', '#f97316', '#ef4444'],
-                borderRadius: 8,
-                borderSkipped: false
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-                y: { beginAtZero: true, ticks: { stepSize: 1 } },
-                x: { grid: { display: false } }
-            }
-        }
-    });
+    data.forEach(r => { const s = r.score; if (s>=90) ranges['90-100']++; else if (s>=80) ranges['80-89']++; else if (s>=70) ranges['70-79']++; else if (s>=60) ranges['60-69']++; else ranges['أقل من 60']++; });
+    distributionChart = new Chart(ctx, { type: 'bar', data: { labels: Object.keys(ranges), datasets: [{ label: 'عدد الاختبارات', data: Object.values(ranges), backgroundColor: ['#10b981','#34d399','#f59e0b','#f97316','#ef4444'], borderRadius: 8 }] }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } }, x: { grid: { display: false } } } } });
 }
-
 function renderStudentsList(data) {
     const container = document.getElementById('studentsList');
     container.innerHTML = '';
-    
     const studentMap = {};
-    data.forEach(r => {
-        if (!studentMap[r.name] || new Date(r.date) > new Date(studentMap[r.name].date)) {
-            studentMap[r.name] = r;
-        }
-    });
-    
-    const students = Object.values(studentMap).sort((a, b) => b.score - a.score);
-    
-    students.forEach(s => {
-        const attempts = data.filter(r => r.name === s.name).length;
-        const row = document.createElement('div');
-        row.className = 'student-row';
-        
-        let scoreClass = 'score-low';
-        if (s.score >= 80) scoreClass = 'score-high';
-        else if (s.score >= 60) scoreClass = 'score-mid';
-        
-        row.innerHTML = `
-            <div>
-                <div class="student-name">${s.name}</div>
-                <div class="student-meta">${s.class} | ${attempts} محاولة</div>
-            </div>
-            <div class="student-score ${scoreClass}">${s.score}%</div>
-        `;
-        container.appendChild(row);
-    });
-    
-    if (students.length === 0) {
-        container.innerHTML = '<p style="text-align: center; color: var(--text-light); padding: 20px;">لا توجد بيانات</p>';
-    }
+    data.forEach(r => { if (!studentMap[r.name] || new Date(r.date) > new Date(studentMap[r.name].date)) studentMap[r.name] = r; });
+    const students = Object.values(studentMap).sort((a,b) => b.score - a.score);
+    students.forEach(s => { const attempts = data.filter(r => r.name === s.name).length; const row = document.createElement('div'); row.className = 'student-row'; let scoreClass = 'score-low'; if (s.score >= 80) scoreClass = 'score-high'; else if (s.score >= 60) scoreClass = 'score-mid'; row.innerHTML = `<div><div class="student-name">${s.name}</div><div class="student-meta">${s.class} | ${attempts} محاولة</div></div><div class="student-score ${scoreClass}">${s.score}%</div>`; container.appendChild(row); });
+    if (students.length === 0) container.innerHTML = '<p style="text-align: center; color: var(--text-light); padding: 20px;">لا توجد بيانات</p>';
 }
 
-// ==================== INITIALIZATION ====================
 document.addEventListener('DOMContentLoaded', async function() {
-    // تحميل البيانات من SheetDB
-    await loadQuizData();
-    
-    // استعادة بيانات الطالب
+    await loadQuizData(false);
     const savedStudent = localStorage.getItem('currentStudent');
-    if (savedStudent) {
-        try {
-            const s = JSON.parse(savedStudent);
-            document.getElementById('studentName').value = s.name || '';
-            document.getElementById('studentClass').value = s.class || '';
-        } catch(e) {}
-    }
-    
-    // إغلاق المودال بالEscape
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Escape') closeTeacherModal();
-    });
+    if (savedStudent) try { const s = JSON.parse(savedStudent); document.getElementById('studentName').value = s.name || ''; document.getElementById('studentClass').value = s.class || ''; } catch(e) {}
+    document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeTeacherModal(); });
 });
 </script>
 </body>
