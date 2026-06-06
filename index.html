@@ -633,13 +633,14 @@ function showScreen(id) {
 
 function setTeacherAccessVisible(visible) {
     document.getElementById('teacherAccess').classList.toggle('hidden', !visible);
-}// ==================== LOCAL STORAGE & NETWORKING 
+
+
+}
+
 
 ====================// ==================== LOCAL STORAGE & NETWORKING ====================
 // ==================== LOCAL STORAGE & NETWORKING ====================
-
-// رابط قاعدة البيانات السحابية الخاص بك
-const SHEETDB_API_URL = 'https://sheetdb.io/api/v1/809jtgv7fqnzj';
+const SHEETDB_API_URL = 'https://sheetdb.io';
 
 function saveToStorage(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 function loadFromStorage(key, defaultValue) {
@@ -655,80 +656,24 @@ function saveResult(result) {
     saveToStorage('quizResults', results);
 
     const dataToSend = {
-        name: result.name || studentName,
+        name: result.name || studentName || '',
         score: (result.score !== undefined ? result.score : '') + ' / ' + (result.total || 20),
         date: new Date().toLocaleDateString('ar-EG')
     };
 
     fetch(SHEETDB_API_URL, {
         method: 'POST',
-        headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-        },
+        headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
         body: JSON.stringify({ data: [dataToSend] })
-    })
-    .then(response => response.json())
-    .then(res => {
-        console.log('✅ تم حفظ الدرجة سحابياً بنجاح:', res);
-        updateLocalDataFromCloud();
-    })
-    .catch(err => console.error('❌ خطأ في الحفظ السحابي:', err));
+    }).catch(function(e) { console.log(e); });
 }
 
 function getAllResults() { return loadFromStorage('quizResults', []); }
 
-// الدالة السحابية المحدثة بالرابط الجديد والمؤمنة ضد قراءة الأصفار
-function updateLocalDataFromCloud() {
-    fetch(SHEETDB_API_URL)
-    .then(response => response.json())
-    .then(data => {
-        if (!Array.isArray(data)) return;
-        
-        const formattedResults = data.map(row => {
-            let scoreVal = 0;
-            let totalVal = 20;
-            
-            // معالجة وحماية نصوص الدرجات القادمة من جدول جوجل وتحويلها لأرقام
-            if (row.score && String(row.score).includes('/')) {
-                const parts = String(row.score).split('/');
-                scoreVal = parseInt(parts[0].trim()) || 0;
-                totalVal = parseInt(parts[1].trim()) || 20;
-            } else if (row.score) {
-                scoreVal = parseInt(String(row.score).trim()) || 0;
-            }
-            
-            return {
-                name: row.name || '',
-                score: scoreVal,
-                total: totalVal,
-                date: row.date || ''
-            };
-        });
-        
-        // 1. تخزين البيانات السحابية في ذاكرة المتصفح الحالية
-        saveToStorage('quizResults', formattedResults);
-        console.log('🔄 تم تحديث لوحة التحكم من السحابة بنجاح!');
-        
-        // 2. تحديث الرسوم البيانية والجداول تلقائياً فور وصول البيانات لمنع بقاء الأصفار
-        if (typeof updateCharts === 'function') updateCharts();
-        if (typeof renderAdmin === 'function') renderAdmin();
-        if (typeof initDashboard === 'function') initDashboard();
-        if (typeof displayResults === 'function') displayResults();
-    })
-    .catch(error => console.error('❌ خطأ في تحديث البيانات السحابية:', error));
-}
-
-// تشغيل التحديث التلقائي فور فتح الصفحة
-updateLocalDataFromCloud();
-
-// تحديث دوري مستمر في الخلفية كل 15 ثانية لمزامنة سريعة بين الأجهزة
-setInterval(updateLocalDataFromCloud, 15000);
-
-
 function studentKey(r) {
-    return r.name + '|' + (r.class || '') + '|' + (r.id || '');
+    return (r && r.name ? r.name : '') + '|' + (r && r.class ? r.class : '') + '|' + (r && r.id ? r.id : '');
 }
+
 
 // إصلاح موضع إشارة السالب فقط دون عكس باقي الرموز
 function fixMinusSign(text) {
