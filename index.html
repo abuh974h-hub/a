@@ -633,8 +633,11 @@ function showScreen(id) {
 
 function setTeacherAccessVisible(visible) {
     document.getElementById('teacherAccess').classList.toggle('hidden', !visible);
-}// ==================== LOCAL STORAGE & NETWORKING ====================
-const SHEETDB_API_URL = 'https://sheetdb.io/api/v1/oe95454vyk99h';
+}// ==================== LOCAL STORAGE & NETWORKING 
+
+====================// ==================== LOCAL STORAGE & NETWORKING ====================
+
+const SHEETDB_API_URL = 'https://sheetdb.io/api/v1/809jtgv7fqnzj';
 
 function saveToStorage(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
 function loadFromStorage(key, defaultValue) {
@@ -673,22 +676,29 @@ function saveResult(result) {
 
 function getAllResults() { return loadFromStorage('quizResults', []); }
 
-// دالة التحديث السحابي التلقائي لضمان مزامنة الأجهزة
+// 🌟 الدالة المصححة لجلب البيانات من جدول جوجل بنجاح وتحويلها للوحة التحكم
 function updateLocalDataFromCloud() {
     fetch(SHEETDB_API_URL)
     .then(response => response.json())
     .then(data => {
+        if (!Array.isArray(data)) return;
+        
         const formattedResults = data.map(row => {
+            // إصلاح الخطأ: تقسيم النص بشكل صحيح باستخدام المتغير row.score السليم
             const scoreParts = row.score ? row.score.split('/') : ['0', '20'];
+            const scoreVal = scoreParts[0] ? parseInt(scoreParts[0].trim()) : 0;
+            const totalVal = scoreParts[1] ? parseInt(scoreParts[1].trim()) : 20;
+            
             return {
-                name: row.name,
-                score: parseInt(scoreParts[0].trim()) || 0,
-                total: parseInt(scoreParts[1].trim()) || 20,
-                date: row.date
+                name: row.name || '',
+                score: isNaN(scoreVal) ? 0 : scoreVal,
+                total: isNaN(totalVal) ? 20 : totalVal,
+                date: row.date || ''
             };
         });
+        
         saveToStorage('quizResults', formattedResults);
-        console.log('🔄 تم تحديث لوحة التحكم سحابياً بنجاح!');
+        console.log('🔄 تم تحديث لوحة التحكم من السحابة بنجاح!');
     })
     .catch(error => console.error('❌ خطأ في تحديث البيانات السحابية:', error));
 }
@@ -696,7 +706,7 @@ function updateLocalDataFromCloud() {
 // تشغيل التحديث تلقائياً بمجرد فتح الصفحة
 updateLocalDataFromCloud();
 
-// تحديث دوري في الخلفية كل 30 ثانية لجلب أي درجات جديدة
+// تحديث دوري في الخلفية كل 30 ثانية
 setInterval(updateLocalDataFromCloud, 30000);
 
 
