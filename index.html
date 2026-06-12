@@ -663,7 +663,7 @@ async function fetchFromSheetDB() {
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 8000);
-        const response = await fetch(SHEETDB_API_URL, { signal: controller.signal });
+        const response = await fetch(APPS_SCRIPT_URL, { signal: controller.signal });
         clearTimeout(timeoutId);
         if (!response.ok) throw new Error('HTTP ' + response.status);
         const data = await response.json();
@@ -677,7 +677,7 @@ async function fetchFromSheetDB() {
 
 async function saveToSheetDB(record) {
     try {
-        const response = await fetch(SHEETDB_API_URL, {
+        const response = await fetch(APPS_SCRIPT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ data: [record] })
