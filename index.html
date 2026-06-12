@@ -674,19 +674,21 @@ async function fetchFromSheetDB() {
         return [];
     }
 }
-
 async function saveToSheetDB(record) {
     try {
         const response = await fetch(APPS_SCRIPT_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ data: [record] })
+            // ⬅️ قمنا بحذف سطر headers بالكامل
+            body: JSON.stringify({ data: [record] }) 
         });
+        
         if (!response.ok) throw new Error('HTTP ' + response.status);
+        
+        const result = await response.json();
         showSyncStatus('✅ تم الحفظ في السحابة', 'success');
         return true;
     } catch (error) {
-        console.error('SheetDB save error:', error);
+        console.error('Save error:', error);
         showSyncStatus('⚠️ تم الحفظ محلياً فقط', 'error');
         return false;
     }
