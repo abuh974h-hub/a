@@ -685,7 +685,7 @@ async function saveToSheetDB(record) {
         if (!response.ok) throw new Error('HTTP ' + response.status);
         
         const result = await response.json();
-        showSyncStatus('✅ تم الحفظ في السحابة', 'success');
+        showSyncStatus('✅ تم الحفظ ', 'success');
         return true;
     } catch (error) {
         console.error('Save error:', error);
@@ -724,7 +724,7 @@ async function loadQuizData(forceSync = false) {
             if (remoteData.length > 0) {
                 quizResults = remoteData;
                 localStorage.setItem('mathQuiz_backup', JSON.stringify(quizResults));
-                showSyncStatus('✅ تم تحديث البيانات من السحابة', 'success');
+                showSyncStatus('✅ تمت المزامنة', 'success');
             }
         }
     } catch (error) {
